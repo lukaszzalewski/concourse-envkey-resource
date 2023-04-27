@@ -1,5 +1,5 @@
 IMAGE_NAME:=justonecommand/concourse-envkey-resource
-IMAGE_TAG:=0.0.0
+IMAGE_TAG:=0.0.1
 
 docker_build:
 	@pip freeze > requirements.txt

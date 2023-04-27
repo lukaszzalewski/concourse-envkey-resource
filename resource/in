@@ -5,7 +5,7 @@ import json
 import hashlib
 import os
 import sys
-import envkey
+import semver
 
 DEBUG = True if os.getenv('DEBUG') == 'true' else False
 
@@ -19,24 +19,60 @@ def in_(instream):
         print(config)
 
     envkey_value = config["source"].get('envkey')
+    load_ignored_vars = config["source"].get('load_ignored_vars', False)
+    env_vars_as_files = config["source"].get('env_vars_as_files', False)
     ignore = config["source"].get('ignore_vars', [])
-    vars = envkey.fetch_env(envkey_value, cache_enabled=True)
-    vars_with_ignorded_vars = common.remove_items_from_dict(vars,ignore)
+    semver_target = config["source"].get('semver_target', '')
+    bump = config["params"].get('bump','')
+    only_monitor = config["source"].get('only_monitor_vars', [])
+    only_monitor_flag = True if len(only_monitor) > 0 else False
+
+    vars = common.run_envkey_source_command(["--json"], {"ENVKEY": envkey_value})
+
+    if not load_ignored_vars:
+        for item in ignore:
+            if item in vars:
+                vars.pop(item)
+
+    filtered_vars = {}
+    if not load_ignored_vars and only_monitor_flag:
+        for item in only_monitor:
+            filtered_vars[item] = vars[item]
+        vars = filtered_vars
+
+    if len(semver_target) > 0:
+        version_parse = semver.VersionInfo.parse(vars[semver_target])
+        if 'patch' in bump:
+            version_parse = version_parse.bump_patch()
+        if 'major' in bump:
+            version_parse = version_parse.bump_major()
+        if 'minor' in bump:
+            version_parse = version_parse.bump_minor()
+        print('new_version', bump, version_parse)
+        vars[semver_target] = str(version_parse)
 
     # hash only vars we care about for tracking
-    hash = hashlib.md5(json.dumps(vars_with_ignorded_vars, sort_keys=True).encode('utf-8')).hexdigest()
+    hash_vars = vars
+    for item in ignore:
+        if item in vars:
+            hash_vars.pop(item)
+    hash = hashlib.md5(json.dumps(hash_vars, sort_keys=True).encode('utf-8')).hexdigest()
 
     if DEBUG:
         print("Vars:", vars)
-        print("Vars Ignore:", vars_with_ignorded_vars)
+        print("Vars Ignore:", vars)
         print("Hash:", hash)
 
-    opened_file = open(env_file, "w")
-
-    for k, v in vars.items():
-        opened_file.write(str(k) + '='+ str(v) + '\n')
-
-    opened_file.close()
+    if env_vars_as_files:
+        for k, v in vars.items():
+            opened_file = open(os.path.join(sys_dir, k), "w")
+            opened_file.write(str(v))
+            opened_file.close()
+    else:
+        opened_file = open(env_file, "w")
+        for k, v in vars.items():
+            opened_file.write(str(k) + '='+ str(v) + '\n')
+        opened_file.close()
 
     return {
         'version': { 'ref': hash}

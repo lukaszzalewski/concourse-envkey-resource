@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import common
-import envkey
 import hashlib
 import json
 import os
@@ -12,26 +11,62 @@ DEBUG = True if os.getenv('DEBUG') == 'true' else False
 def out_(instream):
     config = json.load(instream)
     response = {}
+    #vars injested from the task
+    new_vars = {}
+    #track keys updated
+    updated_keys = []
 
     if DEBUG:
         print(config)
 
     envkey_value = config["source"].get('envkey')
-    changefile = config["source"].get('changefile')
+    cli_key = config["source"].get('cli_key')
+    app_name = config["source"].get('app_name')
+    environment = config["source"].get('environment')
+    load_ignored_vars = config["source"].get('load_ignored_vars', False)
+    changefile = config["params"].get('file')
     ignore = config["source"].get('ignore_vars', [])
-    vars = envkey.fetch_env(envkey_value, cache_enabled=True)
-    vars_with_ignorded_vars = common.remove_items_from_dict(vars,ignore)
+    only_monitor = config["source"].get('only_monitor_vars', [])
+    only_monitor_flag = True if len(only_monitor) > 0 else False
+
+    vars = common.run_envkey_source_command(["--json"], {"ENVKEY": envkey_value})
+    if not load_ignored_vars:
+        for item in ignore:
+            if item in vars:
+                vars.pop(item)
+
+    filtered_vars = {}
+    if not load_ignored_vars and only_monitor_flag:
+        for item in only_monitor:
+            filtered_vars[item] = vars[item]
+        vars = filtered_vars
+
+    with open(changefile) as file:
+        for line in file:
+            parsed_var = line.lstrip().rstrip().split('=')
+            new_vars[parsed_var[0]] = parsed_var[1] 
 
     # hash only vars we care about for tracking
-    hash = hashlib.md5(json.dumps(vars_with_ignorded_vars, sort_keys=True).encode('utf-8')).hexdigest()
+    hash_vars = vars
+    for item in ignore:
+        if item in vars:
+            hash_vars.pop(item)
+    hash = hashlib.md5(json.dumps(hash_vars, sort_keys=True).encode('utf-8')).hexdigest()
+
+    for key, value in vars.items():
+        if key in new_vars:
+            if vars[key] != new_vars[key]:
+                if DEBUG:
+                    print('Updating:', key, 'From:', vars[key], 'To:', new_vars[key])
+                vars[key] = new_vars[key]
+                updated_keys.append(key)
+                common.run_envkey_command(["set", app_name, environment, key+"="+vars[key], "-c" ], cli_key)
 
     if DEBUG:
-        print("Envkey:", envkey)
-        print("Vars:", vars)
-        print("Vars Ignore:", vars_with_ignorded_vars)
+        print("Envkey:", envkey_value)
+        print("Changes:", new_vars)
+        print("Vars Ignore:", vars)
         print("Hash:", hash)
-
-        ["envkey-source", "set", "VARIABLE"]
 
     response["version"] = {"ref" : hash}
 

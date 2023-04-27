@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import common
-import envkey
 import hashlib
 import json
 import os
@@ -18,15 +17,28 @@ def check_(instream):
 
     envkey_value = config["source"].get('envkey')
     ignore = config["source"].get('ignore_vars', [])
-    vars = envkey.fetch_env(envkey_value, cache_enabled=True)
-    vars_with_ignorded_vars = common.remove_items_from_dict(vars,ignore)
+    only_monitor = config["source"].get('only_monitor_vars', [])
+    only_monitor_flag = True if len(only_monitor) > 0 else False
+
+    vars = common.run_envkey_source_command(["--json"], {"ENVKEY": envkey_value})
+    #remove ignored vars from tracking
+    if not only_monitor_flag:
+        for item in ignore:
+            if item in vars:
+                vars.pop(item)
+
+    #remove everything except whats being asked to track
+    filtered_vars = {}
+    if only_monitor_flag:
+        for item in only_monitor:
+            filtered_vars[item] = vars[item]
+    vars = filtered_vars
 
     # hash only vars we care about for tracking
-    hash = hashlib.md5(json.dumps(vars_with_ignorded_vars, sort_keys=True).encode('utf-8')).hexdigest()
+    hash = hashlib.md5(json.dumps(vars, sort_keys=True).encode('utf-8')).hexdigest()
 
     if DEBUG:
         print("Vars:", vars)
-        print("Vars Ignore:", vars_with_ignorded_vars)
         print("Hash:", hash)
 
     if 'version' in config:
